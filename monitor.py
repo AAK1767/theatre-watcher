@@ -8,6 +8,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import TimeoutException
 
 # ---------------- CONFIG ----------------
 MOVIES = {
@@ -27,6 +28,7 @@ THEATRE_PATTERN = re.compile(r"\b(pvr|inox|cinepolis|miraj|carnival|multiplex|ci
 UA = "theatre-watcher/1.0 (personal use)"
 TIME_RE = re.compile(r"^\d{1,2}:\d{2}\s?[AP]M$", re.I)
 SKIP_RE = re.compile(r"km away|cancellation|^cc$", re.I)
+ANY_TIME_RE = re.compile(r"\d{1,2}:\d{2}\s?[AP]M", re.I)
 
 
 # ---------- scraping ----------
@@ -35,6 +37,7 @@ def get_driver():
     opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--window-size=1920,1080")
     opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     return webdriver.Chrome(options=opts)
@@ -67,11 +70,27 @@ def parse_theatres(text):
 
 
 def extract_theatres(driver, url):
+    # Pretend the browser is at PES RR in Bengaluru, since the site shows shows by location
+    lat, lon = ORIGINS["PES RR"]
+    driver.execute_cdp_cmd("Browser.grantPermissions",
+                           {"origin": "https://www.district.in", "permissions": ["geolocation"]})
+    driver.execute_cdp_cmd("Emulation.setGeolocationOverride",
+                           {"latitude": lat, "longitude": lon, "accuracy": 100})
+    driver.execute_cdp_cmd("Emulation.setTimezoneOverride", {"timezoneId": "Asia/Kolkata"})
+
     driver.get(url)
     body = lambda d: d.find_element(By.TAG_NAME, "body").text
-    WebDriverWait(driver, 20).until(lambda d: len(body(d)) > 200)
+    try:
+        WebDriverWait(driver, 30).until(lambda d: ANY_TIME_RE.search(body(d)))
+    except TimeoutException:
+        print("  Timed out: no showtimes appeared on the page")
     text = body(driver)
     print(f"  page text length: {len(text)}")
+    # --- debug output: remove once it's working ---
+    print("  ---- page text start ----")
+    print(text[:1500])
+    print("  ---- page text end ----")
+    driver.save_screenshot("debug.png")
     return parse_theatres(text)
 
 
